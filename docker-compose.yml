@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: verascope-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: verascope
+      POSTGRES_PASSWORD: verascope
+      POSTGRES_DB: verascope
+    ports:
+      # Host port 5433 (not 5432) -- avoids clashing with any native/other
+      # Postgres install already listening on the host's 5432.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verascope -d verascope"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- Optional: full containerized run (backend + frontend) ---
+  # Not needed for normal dev (run backend/frontend on host for hot-reload).
+  # Usage: docker compose --profile full up --build
+  backend:
+    profiles: ["full"]
+    build:
+      context: ./backend
+    container_name: verascope-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://verascope:verascope@postgres:5432/verascope
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /app
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ./frontend
+    container_name: verascope-frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:
