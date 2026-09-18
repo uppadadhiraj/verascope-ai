@@ -146,15 +146,27 @@ export function DependencyGraphPage() {
 
   // The files with the most total connections -- a quick answer to "what's
   // the central/riskiest file in this codebase" without having to eyeball
-  // node sizes in a dense force layout.
+  // node sizes in a dense force layout. Ranked by UNIQUE connected files
+  // (via directedNeighbors), not the backend's raw in_degree/out_degree --
+  // those count one row per resolved import statement, so a file that
+  // imports the same neighbor five times inflates its raw degree without
+  // actually being connected to more files. Using the same unique count
+  // here as in the selected-node panel below keeps the two numbers
+  // consistent instead of silently disagreeing about what "connections"
+  // means, which is exactly what happened before this fix (a file showing
+  // "65" here and "10 imports + 8 imported by" = 18 down there).
   const topFiles = useMemo(() => {
     if (!graph) return [];
-    return [...graph.nodes]
-      .map((n) => ({ id: n.id, inDegree: n.in_degree, outDegree: n.out_degree, degree: n.in_degree + n.out_degree }))
-      .filter((n) => n.degree > 0)
+    return [...directedNeighbors.entries()]
+      .map(([id, dirs]) => ({
+        id,
+        inDegree: dirs.in.size,
+        outDegree: dirs.out.size,
+        degree: dirs.in.size + dirs.out.size,
+      }))
       .sort((a, b) => b.degree - a.degree)
       .slice(0, 8);
-  }, [graph]);
+  }, [graph, directedNeighbors]);
 
   const searchMatches = useMemo(() => {
     if (!search.trim() || !graph) return [];
