@@ -33,7 +33,14 @@ class LocalEmbedder(Embedder):
         from sentence_transformers import SentenceTransformer
 
         self._model = SentenceTransformer(model_name)
-        self._dimensions = self._model.get_sentence_embedding_dimension()
+        # get_sentence_embedding_dimension() was renamed to
+        # get_embedding_dimension() in sentence-transformers 5.x; requirements.txt
+        # allows >=3.3, so support both instead of pinning a higher floor just
+        # for this one call.
+        if hasattr(self._model, "get_embedding_dimension"):
+            self._dimensions = self._model.get_embedding_dimension()
+        else:
+            self._dimensions = self._model.get_sentence_embedding_dimension()
 
     @property
     def dimensions(self) -> int:
