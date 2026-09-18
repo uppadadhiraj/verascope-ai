@@ -1,5 +1,7 @@
 # Verascope
 
+[![CI](https://github.com/uppadadhiraj/verascope-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/uppadadhiraj/verascope-ai/actions/workflows/ci.yml)
+
 AI Repository Intelligence & Autonomous Debugging Platform.
 
 The name: *vera* (truth, Latin) + *-scope* (an instrument for examining) — an instrument for
@@ -175,10 +177,35 @@ gaps that looked like bugs from the outside:
   (built earlier in the session, evidence-grounded, not LLM-invented) that actually can. Added a
   visible link and updated the chat empty-state copy.
 
-**Known gap, not silently accepted**: a repository/task can still get stuck in a non-terminal
-status forever if the backend process itself dies or restarts mid-job (there is no crash
-recovery / job-heartbeat mechanism for the simple `BackgroundTasks` approach this MVP uses).
-Recovering currently requires manual intervention; a real job queue is the correct V2 fix.
+### Pass 4 — GSSOC readiness (contributor-facing, not user-facing)
+
+A different kind of gap: everything above was verified as a *user* of the app. This pass checked
+it as a *contributor* would — clone it, set it up, run the tests, open a PR — since that's the bar
+that actually matters for GSSOC.
+
+- **Crash recovery was a documented gap, not just implemented around.** A repository/task could
+  get stuck in a non-terminal status forever if the backend process died or restarted mid-job (no
+  heartbeat/recovery mechanism for the simple `BackgroundTasks` approach this MVP uses). Fixed with
+  `backend/app/core/reconcile.py`, wired into a FastAPI `lifespan` startup hook: on every startup,
+  anything left mid-job by whatever process existed before this one is — by definition, since this
+  process hasn't dispatched anything yet — not actually still running, so it's safe to mark it
+  `FAILED` with a clear, specific message instead of leaving it stuck silently. Verified three ways:
+  a fake-session unit test (`tests/test_reconcile.py`), and a real run against a disposable Postgres
+  with genuinely stuck rows inserted, confirmed recovered correctly end-to-end.
+- **A bare `pytest` run from `backend/` silently exploded** for anyone who'd already ingested a
+  repository through the app: pytest recursed into `data/repos/`/`data/workspaces/` (gitignored
+  runtime storage — cloned repositories and Fix Agent workspaces) and tried to collect *those*
+  projects' own `tests/test_*.py` files, which immediately failed on missing dependencies and
+  aborted the entire run before a single real test executed. Every contributor who tries the app
+  locally before running tests would hit this. Fixed with `backend/pytest.ini` (`testpaths = tests`).
+- **No CI.** Added `.github/workflows/ci.yml`: backend job runs `alembic upgrade head` + an app
+  import check + `pytest` against a real (ephemeral, containerized) Postgres; frontend job runs
+  `npm run build` (typecheck + build). Both verified locally against a disposable Postgres
+  container before being trusted, the same standard the rest of this README holds itself to.
+- **No contributor-facing docs or templates.** Added `CONTRIBUTING.md` (setup recap, the
+  codebase's actual conventions — e.g. the rollback-before-commit rule from Pass 2 bug #4, and the
+  requirement that new stuck-able statuses get added to `reconcile_stuck_state()`), a bug report
+  template, a feature request template, and a PR template under `.github/`.
 
 ## Known limitations (deliberate MVP scope, not gaps to hide)
 
@@ -189,8 +216,10 @@ Recovering currently requires manual intervention; a real job queue is the corre
   dependency was introduced for this MVP. It covers the common declaration shapes well; it is not
   claimed to be exhaustive.
 - **Background jobs are FastAPI `BackgroundTasks`**, not Celery/Redis. Correct and simple for an
-  MVP; a real queue is the natural V2 if you need retries, distribution, or crash recovery of
-  in-flight jobs.
+  MVP; a real queue is the natural V2 if you need retries or distribution across multiple worker
+  processes. Crash recovery for the *current* process's in-flight jobs is handled (see Pass 4) —
+  what a real queue would add on top is recovering jobs that were still running on a worker that's
+  now gone, and retrying transient failures automatically.
 - **Progress is polled, not pushed.** No websockets/SSE yet; the frontend polls status endpoints.
 - **The security scanner doesn't distinguish string literals from real code.** Found live: a test
   fixture building an XSS payload string containing the text `eval(...)` was flagged as unsafe
@@ -334,3 +363,12 @@ pytest tests/ -v
 cd frontend
 npm run build   # type-checks (tsc -b) then builds
 ```
+
+CI (`.github/workflows/ci.yml`) runs these same two checks on every push/PR, plus
+`alembic upgrade head` and an app-import check against a fresh Postgres — catching migration and
+startup-time errors that a unit test run alone wouldn't.
+
+## Contributing
+
+Contributions welcome, including as part of GSSOC — see [CONTRIBUTING.md](CONTRIBUTING.md) for
+setup, this codebase's conventions, and the PR process.

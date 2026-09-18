@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -17,15 +19,30 @@ from app.api.routes import (
     test_runs,
 )
 from app.core.config import get_settings
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, get_logger
+from app.core.reconcile import reconcile_stuck_state
 
 settings = get_settings()
 configure_logging(settings.app_env)
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Recover anything a previous process left mid-job on crash/restart
+    # (see reconcile.py) -- must run before the app starts accepting
+    # traffic, so a client can never observe a repository/task stuck in a
+    # non-terminal status that's actually dead.
+    reconcile_stuck_state()
+    logger.info("startup_reconciliation_complete")
+    yield
+
 
 app = FastAPI(
     title="Verascope",
     description="AI Repository Intelligence & Autonomous Debugging Platform",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
